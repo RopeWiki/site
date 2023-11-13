@@ -169,6 +169,8 @@ COPY ./webserver/robots /rw/robots
 # === Set up startup behavior ===
 USER root
 COPY ./webserver/scripts/system_start.sh /root/system_start.sh
+COPY ./webserver/scripts/check-php.sh /root/check-php.sh
+RUN chmod +x /root/check-php.sh
 
 # Set default parameters (that may be overwritten via environment variables)
 ENV WG_DB_SERVER ropewiki_db
@@ -182,6 +184,8 @@ ENV RW_ROBOTS robots_dev.txt
 
 ARG codebaseversion=When this image was built with Docker, <pre>codebaseversion</pre> Docker arg was not specified.
 RUN echo "<html><body>${codebaseversion}</body></html>" > /rw/codebase_version.html
+
+RUN echo "* * * * * /root/check-php.sh" >> /var/spool/cron/crontabs/root
 
 CMD sh /root/system_start.sh
 
