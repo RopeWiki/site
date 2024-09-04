@@ -3,7 +3,7 @@
 # To build this image, run the following command starting from the root of the repository:
 #   docker image build -f webserver/Dockerfile -t ropewiki/webserver .
 
-FROM ubuntu:20.04
+FROM ubuntu:24.04
 
 # === Install services and tools ===
 
@@ -18,7 +18,7 @@ RUN apt-get -y upgrade
 # Install nginx
 RUN apt-get install -y --no-install-recommends nginx
 
-ARG PHP_VERSION=5.6
+ARG PHP_VERSION=7.1
 # Install php and associated packages
 # PHP compatibility: https://www.mediawiki.org/wiki/Compatibility#PHP
 # Don't start the php service after installation
@@ -32,6 +32,7 @@ RUN apt-get install -y --no-install-recommends software-properties-common && \
         php$PHP_VERSION-apcu \
         php$PHP_VERSION-fpm \
         php$PHP_VERSION-cli \
+        php$PHP_VERSION-curl \
         php$PHP_VERSION-mysql \
         php$PHP_VERSION-imagick \
         php$PHP_VERSION-xml \
@@ -50,7 +51,7 @@ RUN apt-get install -y --no-install-recommends wget unzip git nano sed curl imag
 
 # Install composer
 # https://stackoverflow.com/a/51446468/651139
-RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer --1
 
 # Bump file size upload limit
 RUN sed -i 's/^;\?upload_max_filesize.*/upload_max_filesize = 10M/' /etc/php/current/fpm/php.ini
@@ -66,7 +67,7 @@ COPY ./webserver/fpm-pool.conf /etc/php/current/fpm/pool.d/www.conf
 
 
 # === Install MediaWiki ===
-ARG MV_VERSION=1.24.1
+ARG MV_VERSION=1.27.1
 RUN wget https://releases.wikimedia.org/mediawiki/${MV_VERSION%.*}/mediawiki-$MV_VERSION.tar.gz && \
     tar xvzf mediawiki-$MV_VERSION.tar.gz && \
 	mv mediawiki-$MV_VERSION /usr/share/nginx/html/ropewiki && \
@@ -77,11 +78,27 @@ RUN ln -s /usr/share/nginx/html/ropewiki /rw
 
 # === Install extensions ===
 
-COPY ./webserver/html/ropewiki/composer.json /usr/share/nginx/html/ropewiki/composer.json
-RUN cd /rw && composer config --no-plugins allow-plugins.composer/installers false && composer install
+WORKDIR /rw
+RUN composer require --no-update mediawiki/semantic-media-wiki 2.5.8
+RUN composer require --no-update mediawiki/header-footer 3.0.1
+RUN composer require --no-update mediawiki/semantic-maps 3.1.3
+RUN composer require --no-update mediawiki/semantic-result-formats 2.4.2
+RUN COMPOSER_ALLOW_SUPERUSER=yes composer install
+WORKDIR /
+
+
+# This is hack to make the newer Vector theme work with our Common.js which
+# assumes the title is nested one level down.
+# Error:  i.children[(i.children.length - 1)] is undefined
+WORKDIR /rw/skins/Vector
+RUN sed -i '117 i\?><span><?php' VectorTemplate.php
+RUN sed -i '119 i\?></span><?php' VectorTemplate.php
+WORKDIR /
+
+
 
 # Copy missing 'powered by semantic mediawiki' image (seems peculiar to SMW 2.1 version)
-COPY ./webserver/html/ropewiki/extensions/SemanticMediaWiki/smw_button.png /rw/extensions/usr/share/nginx/html/ropewiki/vendor/mediawiki/semantic-media-wiki/resources/images/smw_button.png
+COPY ./webserver/html/ropewiki/extensions/SemanticMediaWiki/smw_button.png /rw/extensions/usr/share/nginx/html/ropewiki/vendor/mediawiki/semantic-media-wiki/res/images/smw_button.png
 
 # Note: We do not need to follow the rest of the instructions to install
 # SemanticMediaWiki 2.1 because the files we will copy over are already
@@ -95,8 +112,8 @@ COPY ./webserver/html/ropewiki/extensions/SemanticMediaWiki/smw_button.png /rw/e
 
 RUN cd /rw/extensions && git clone https://github.com/SemanticMediaWiki/SemanticCompoundQueries.git && cd SemanticCompoundQueries && git checkout f5eed72
 RUN cd /rw/extensions && git clone https://github.com/SemanticMediaWiki/SemanticDrilldown SemanticDrilldown && cd SemanticDrilldown && git checkout a569de7
-RUN cd /rw/extensions && git clone https://github.com/RopeWiki/SemanticFormsInputs.git && cd SemanticFormsInputs && git checkout e8254cf
-RUN cd /rw/extensions && git clone https://github.com/wikimedia/mediawiki-extensions-SemanticRating SemanticRating && cd SemanticRating && git checkout 3af01d6
+RUN cd /rw/extensions && git clone https://github.com/wikimedia/mediawiki-extensions-PageForms PageForms && cd PageForms && git checkout 4.2
+RUN cd /rw/extensions && git clone https://github.com/wikimedia/mediawiki-extensions-SemanticRating SemanticRating && cd SemanticRating
 RUN cd /rw/extensions && git clone https://github.com/wikimedia/mediawiki-extensions-CategoryTree CategoryTree && cd CategoryTree && git checkout 52c3eb7
 RUN cd /rw/extensions && git clone https://github.com/wikimedia/mediawiki-extensions-CheckUser CheckUser && cd CheckUser && git checkout 99f4a22
 RUN cd /rw/extensions && git clone https://github.com/wikimedia/mediawiki-extensions-ContributionScores ContributionScores && cd ContributionScores && git checkout 7e02f8a
@@ -108,11 +125,8 @@ RUN cd /rw/extensions && git clone https://github.com/wikimedia/mediawiki-extens
 RUN cd /rw/extensions && git clone https://github.com/wikimedia/mediawiki-extensions-Scribunto Scribunto && cd Scribunto && git checkout 10abeb5
 RUN cd /rw/extensions && git clone https://github.com/wikimedia/mediawiki-extensions-UrlGetParameters UrlGetParameters && cd UrlGetParameters && git checkout 68afd03
 RUN cd /rw/extensions && git clone https://github.com/wikimedia/mediawiki-extensions-Variables Variables && cd Variables && git checkout 6f4bbd0
-RUN cd /rw/extensions && git clone https://github.com/wikimedia/mediawiki-extensions-PdfHandler PdfHandler && cd PdfHandler && git checkout 5e29202
 RUN cd /rw/extensions && git clone https://gitlab.com/nornagon/Preloader && cd Preloader && git checkout 02539e0
-RUN cd /rw/extensions && git clone https://github.com/RopeWiki/SemanticForms && cd SemanticForms && git checkout 9169c63
-RUN cd /rw/extensions && git clone https://github.com/wikimedia/mediawiki-skins-Vector Vector && cd Vector && git checkout fad72e2
-RUN cd /rw/extensions && git clone https://github.com/wikimedia/mediawiki-extensions-MultimediaViewer.git MultimediaViewer && cd MultimediaViewer && git checkout REL1_24
+RUN cd /rw/extensions && git clone https://github.com/wikimedia/mediawiki-extensions-MultimediaViewer.git MultimediaViewer && cd MultimediaViewer && git checkout REL1_27
 RUN cd /rw/extensions && git clone https://github.com/wikimedia/mediawiki-extensions-ReplaceText ReplaceText && cd ReplaceText && git checkout REL1_24
 
 # Present in main site but not here:
@@ -154,7 +168,7 @@ RUN cd /rw/extensions/SphinxSearch \
  && mv -f sphinx.conf /etc/sphinxsearch/sphinx.conf
 
 # Sphinx: Setup cron job
-RUN apt-get install cron \
+RUN apt-get install -y cron \
  && mv -f /rw/extensions/SphinxSearch/sphinx.cron /etc/cron.d/sphinxsearch-update \
  && chmod 0644 /etc/cron.d/sphinxsearch-update \
  && crontab /etc/cron.d/sphinxsearch-update \
